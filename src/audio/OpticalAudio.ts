@@ -3,237 +3,371 @@ export type PortalSoundTheme = 'dry-eye' | 'refraction' | 'vision-archive' | 'ti
 type PulseKind = 'home' | 'route-in' | 'route-out' | 'water' | 'focus' | 'scan' | 'time';
 type InteractionKind = 'dryeye' | 'refraction' | 'archive' | 'time';
 
-type SceneSpec = {
-  drone: number;
-  glass: number;
-  texture: number;
-  droneGain: number;
-  glassGain: number;
-  textureGain: number;
-  noiseGain: number;
-  noiseFilter: number;
-  room: number;
-  motion: number;
-  pan: number;
-};
-
-type SceneVoice = {
-  scene: AudioScene;
-  output: GainNode;
-  room: GainNode;
-  drone: OscillatorNode;
-  droneGain: GainNode;
-  glass: OscillatorNode;
-  glassGain: GainNode;
-  glassPan: StereoPannerNode;
-  texture: OscillatorNode;
-  textureGain: GainNode;
-  texturePan: StereoPannerNode;
-  noise: AudioBufferSourceNode;
-  noiseGain: GainNode;
-  noiseFilter: BiquadFilterNode;
-  motion: OscillatorNode;
-  sources: AudioScheduledSourceNode[];
-  spec: SceneSpec;
-};
-
-type CueVoice = {
+type ActiveVoice = {
   scene: AudioScene;
   output: GainNode;
   sources: AudioScheduledSourceNode[];
-  cleanupTimer: number;
+  cleanupTimer?: number;
 };
 
-type CueTone = [from: number, to: number, gain: number, wave: OscillatorType];
-type CueSpec = {
+type Tone = {
+  from: number;
+  to: number;
+  level: number;
+  wave?: OscillatorType;
+  delay?: number;
+  duration?: number;
+  pan?: number;
+};
+
+type Cue = {
   duration: number;
   attack: number;
-  level: number;
+  release: number;
   filter: number;
   wet: number;
-  tones: CueTone[];
-  pan?: [number, number];
-  noise?: [gain: number, frequency: number];
+  tones: Tone[];
+  noise?: { level: number; frequency: number; delay?: number; duration?: number };
 };
 
-const scenes: Record<AudioScene, SceneSpec> = {
-  home: { drone: 92, glass: 276, texture: 184, droneGain: .052, glassGain: .014, textureGain: .007, noiseGain: .004, noiseFilter: 620, room: .13, motion: .085, pan: .14 },
-  portal: { drone: 104, glass: 312, texture: 208, droneGain: .045, glassGain: .019, textureGain: .009, noiseGain: .008, noiseFilter: 900, room: .21, motion: .07, pan: .24 },
-  dryeye: { drone: 118, glass: 354, texture: 236, droneGain: .034, glassGain: .011, textureGain: .006, noiseGain: .026, noiseFilter: 760, room: .18, motion: .12, pan: .18 },
-  refraction: { drone: 146, glass: 438, texture: 292, droneGain: .032, glassGain: .018, textureGain: .009, noiseGain: .004, noiseFilter: 1350, room: .16, motion: .095, pan: .28 },
-  archive: { drone: 108, glass: 432, texture: 216, droneGain: .04, glassGain: .018, textureGain: .009, noiseGain: .007, noiseFilter: 1050, room: .22, motion: .16, pan: .2 },
-  time: { drone: 94, glass: 282, texture: 188, droneGain: .049, glassGain: .013, textureGain: .008, noiseGain: .005, noiseFilter: 720, room: .23, motion: .18, pan: .17 },
-  core: { drone: 96, glass: 288, texture: 192, droneGain: .052, glassGain: .02, textureGain: .01, noiseGain: .006, noiseFilter: 860, room: .26, motion: .065, pan: .2 },
+export const DEFAULT_BGM_VOLUME = 0.48;
+export const DEFAULT_SFX_VOLUME = 0.32;
+const BGM_SOURCE = '/assets/audio/eyeverse-theme.mp3';
+
+export function mapVolumeToGain(value: number) {
+  const normalized = Math.max(0, Math.min(1, value));
+  return normalized * normalized;
+}
+
+const homeEntry: Cue = {
+  duration: .76, attack: .035, release: .42, filter: 1650, wet: .34,
+  tones: [
+    { from: 286, to: 342, level: .34 },
+    { from: 572, to: 684, level: .11, delay: .04 },
+    { from: 108, to: 132, level: .42, delay: .08 },
+  ],
+  noise: { level: .045, frequency: 720, duration: .62 },
 };
 
-const cues: Record<'awaken' | 'open' | 'close' | 'water' | 'focus' | 'scanStart' | 'scanComplete' | 'time', CueSpec> = {
-  awaken: { duration: 1.08, attack: .15, level: .105, filter: 980, wet: .2, tones: [[92, 108, .72, 'sine'], [184, 216, .23, 'triangle'], [276, 322, .11, 'sine']], noise: [.035, 520] },
-  open: { duration: 1.24, attack: .13, level: .13, filter: 1120, wet: .27, tones: [[88, 136, .68, 'sine'], [176, 272, .24, 'triangle'], [264, 408, .1, 'sine']], pan: [-.08, .08], noise: [.055, 640] },
-  close: { duration: .92, attack: .08, level: .105, filter: 1050, wet: .22, tones: [[196, 104, .62, 'sine'], [294, 156, .21, 'triangle'], [392, 208, .08, 'sine']], pan: [.1, 0] },
-  water: { duration: .78, attack: .09, level: .09, filter: 1180, wet: .24, tones: [[132, 118, .5, 'sine'], [420, 248, .18, 'sine']], pan: [-.18, .14], noise: [.22, 610] },
-  focus: { duration: .72, attack: .08, level: .095, filter: 1260, wet: .18, tones: [[264, 328, .42, 'sine'], [292, 328, .34, 'sine'], [528, 492, .08, 'triangle']], pan: [-.3, 0] },
-  scanStart: { duration: .9, attack: .1, level: .105, filter: 1360, wet: .22, tones: [[118, 148, .56, 'sine'], [354, 486, .2, 'triangle'], [472, 594, .08, 'sine']], pan: [-.12, .12], noise: [.045, 760] },
-  scanComplete: { duration: 1.28, attack: .1, level: .135, filter: 1280, wet: .3, tones: [[146, 146, .55, 'sine'], [219, 220, .24, 'sine'], [292, 293, .12, 'triangle']], pan: [-.04, .04] },
-  time: { duration: .96, attack: .13, level: .095, filter: 920, wet: .28, tones: [[92, 104, .65, 'sine'], [184, 208, .2, 'triangle'], [276, 286, .07, 'sine']], pan: [-.1, .1] },
+const nodeCues: Record<PortalSoundTheme, Cue> = {
+  'dry-eye': {
+    duration: 1.02, attack: .06, release: .54, filter: 1420, wet: .42,
+    tones: [{ from: 164, to: 192, level: .46 }, { from: 328, to: 382, level: .16, delay: .05, pan: -.16 }],
+    noise: { level: .075, frequency: 620, duration: .72 },
+  },
+  refraction: {
+    duration: .98, attack: .05, release: .5, filter: 1720, wet: .38,
+    tones: [{ from: 224, to: 278, level: .38 }, { from: 249, to: 278, level: .28, pan: .2 }, { from: 448, to: 556, level: .08, delay: .05 }],
+  },
+  'vision-archive': {
+    duration: 1.04, attack: .07, release: .5, filter: 1480, wet: .4,
+    tones: [{ from: 112, to: 148, level: .5 }, { from: 336, to: 444, level: .15, delay: .08, pan: -.12 }],
+    noise: { level: .04, frequency: 880, delay: .06, duration: .7 },
+  },
+  'time-mirror': {
+    duration: 1.08, attack: .09, release: .58, filter: 1260, wet: .46,
+    tones: [{ from: 96, to: 112, level: .54 }, { from: 288, to: 318, level: .12, delay: .09, pan: .14 }],
+  },
+};
+
+const completionCue: Cue = {
+  duration: 1.38, attack: .08, release: .7, filter: 1580, wet: .48,
+  tones: [
+    { from: 146, to: 164, level: .46 },
+    { from: 219, to: 246, level: .22, delay: .12, pan: -.08 },
+    { from: 292, to: 328, level: .16, delay: .25, pan: .1 },
+    { from: 438, to: 492, level: .07, delay: .32 },
+  ],
+  noise: { level: .025, frequency: 760, delay: .08, duration: 1.05 },
+};
+
+const routeOutCue: Cue = {
+  duration: .68, attack: .04, release: .38, filter: 1180, wet: .28,
+  tones: [{ from: 216, to: 132, level: .34 }, { from: 108, to: 92, level: .4, delay: .04 }],
+};
+
+const scanCompleteCue: Cue = {
+  duration: 1.26, attack: .06, release: .65, filter: 1480, wet: .44,
+  tones: [
+    { from: 132, to: 148, level: .48 },
+    { from: 198, to: 222, level: .22, delay: .13 },
+    { from: 264, to: 296, level: .13, delay: .26 },
+  ],
+};
+
+const subtleWater: Cue = {
+  duration: .62, attack: .05, release: .34, filter: 1080, wet: .38,
+  tones: [{ from: 142, to: 118, level: .34 }, { from: 392, to: 246, level: .08, delay: .03 }],
+  noise: { level: .055, frequency: 540, duration: .48 },
+};
+
+const subtleFocus: Cue = {
+  duration: .58, attack: .04, release: .3, filter: 1420, wet: .3,
+  tones: [{ from: 248, to: 306, level: .27, pan: -.12 }, { from: 276, to: 306, level: .23, pan: .12 }],
+};
+
+const subtleTime: Cue = {
+  duration: .72, attack: .07, release: .4, filter: 980, wet: .38,
+  tones: [{ from: 92, to: 102, level: .4 }, { from: 184, to: 204, level: .1, delay: .08 }],
 };
 
 class OpticalAudioEngine {
   private context?: AudioContext;
   private master?: GainNode;
-  private ambientBus?: GainNode;
-  private interactionBus?: GainNode;
-  private completionBus?: GainNode;
+  private musicBus?: GainNode;
+  private sfxBus?: GainNode;
   private reverbInput?: GainNode;
   private noiseBuffer?: AudioBuffer;
-  private activeVoice?: SceneVoice;
-  private activeCues = new Set<CueVoice>();
+  private music?: HTMLAudioElement;
+  private mediaSource?: MediaElementAudioSourceNode;
+  private voices = new Set<ActiveVoice>();
+  private scanVoice?: ActiveVoice;
+  private finaleVoice?: ActiveVoice;
   private desiredScene: AudioScene = 'home';
-  private muted = false;
-  private volume = .82;
+  private bgmMuted = false;
+  private sfxMuted = false;
+  private bgmVolume = DEFAULT_BGM_VOLUME;
+  private sfxVolume = DEFAULT_SFX_VOLUME;
   private unlocked = false;
   private listeners = new Set<() => void>();
-  private lastModulation = 0;
-  private archiveStage = 0;
+  private lastInteractionCue = 0;
+  private lastPreview = 0;
 
   constructor() {
     try {
-      this.muted = localStorage.getItem('eyeverse-sound') === 'off';
-      const savedVolume = Number(localStorage.getItem('eyeverse-volume'));
-      if (Number.isFinite(savedVolume) && savedVolume > 0) this.volume = Math.min(1, savedVolume);
+      const savedBgmValue = localStorage.getItem('bgmVolume');
+      const savedSfxValue = localStorage.getItem('sfxVolume');
+      const savedBgm = savedBgmValue === null ? Number.NaN : Number(savedBgmValue);
+      const savedSfx = savedSfxValue === null ? Number.NaN : Number(savedSfxValue);
+      if (Number.isFinite(savedBgm)) this.bgmVolume = Math.max(0, Math.min(1, savedBgm));
+      if (Number.isFinite(savedSfx)) this.sfxVolume = Math.max(0, Math.min(1, savedSfx));
+      this.bgmMuted = localStorage.getItem('bgmMuted') === 'true';
+      this.sfxMuted = localStorage.getItem('sfxMuted') === 'true';
     } catch {}
     document.addEventListener('visibilitychange', this.handleVisibility);
     window.addEventListener('pageshow', this.handlePageShow);
   }
 
-  isMuted = () => this.muted;
-  getVolume = () => this.volume;
+  // Compatibility snapshots used by the existing Page3 video element.
+  isMuted = () => this.bgmMuted;
+  getVolume = () => this.bgmVolume;
+  isBgmMuted = () => this.bgmMuted;
+  isSfxMuted = () => this.sfxMuted;
+  getBgmVolume = () => this.bgmVolume;
+  getSfxVolume = () => this.sfxVolume;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
 
   async unlock() {
-    if (this.muted) return;
     if (!this.context) this.createGraph();
     if (this.context?.state !== 'running') {
       try { await this.context?.resume(); } catch {}
     }
     this.unlocked = this.context?.state === 'running';
-    if (this.unlocked && this.activeVoice?.scene !== this.desiredScene) this.crossfadeScene(this.desiredScene, 1.15);
-    this.setMasterLevel(.18);
+    if (!this.unlocked) return;
+    this.setMasterLevel(.12);
+    this.applyBusLevels(.08);
+    if (!this.bgmMuted) await this.startMusic();
   }
 
-  async toggle() {
-    this.muted = !this.muted;
-    try { localStorage.setItem('eyeverse-sound', this.muted ? 'off' : 'on'); } catch {}
-    if (this.muted) this.setMasterLevel(.1);
+  setBgmVolume(value: number) {
+    this.bgmVolume = Math.max(0, Math.min(1, value));
+    try { localStorage.setItem('bgmVolume', String(this.bgmVolume)); } catch {}
+    this.applyBusLevels(.045);
+    this.emit();
+  }
+
+  setSfxVolume(value: number) {
+    this.sfxVolume = Math.max(0, Math.min(1, value));
+    try { localStorage.setItem('sfxVolume', String(this.sfxVolume)); } catch {}
+    this.applyBusLevels(.035);
+    this.emit();
+  }
+
+  async toggleBgmMuted() {
+    this.bgmMuted = !this.bgmMuted;
+    try { localStorage.setItem('bgmMuted', String(this.bgmMuted)); } catch {}
+    if (!this.bgmMuted) await this.unlock();
+    this.applyBusLevels(.06);
+    if (this.bgmMuted) window.setTimeout(() => { if (this.bgmMuted) this.music?.pause(); }, 420);
+    this.emit();
+  }
+
+  async toggleSfxMuted() {
+    this.sfxMuted = !this.sfxMuted;
+    try { localStorage.setItem('sfxMuted', String(this.sfxMuted)); } catch {}
+    if (!this.sfxMuted) await this.unlock();
     else {
-      await this.unlock();
-      this.playCue(cues.awaken, .34, false);
+      this.stopArchiveScan(.12);
+      this.stopFinaleJourney(.16);
     }
+    this.applyBusLevels(.05);
     this.emit();
   }
 
-  setVolume(value: number) {
-    this.volume = Math.max(.08, Math.min(1, value));
-    try { localStorage.setItem('eyeverse-volume', String(this.volume)); } catch {}
-    this.setMasterLevel(.065);
-    this.emit();
+  playPreview() {
+    const now = performance.now();
+    if (now - this.lastPreview < 180 || this.sfxMuted || this.sfxVolume === 0) return;
+    this.lastPreview = now;
+    this.playCue(homeEntry, this.desiredScene, .42);
   }
 
-  setScene(scene: AudioScene) {
-    this.activateScene(scene);
-  }
+  setScene(scene: AudioScene) { this.activateScene(scene); }
 
   async prepareScene(_scene: AudioScene) {
-    if (this.muted) return;
     if (!this.context) this.createGraph();
-    if (this.context?.state !== 'running') {
-      try { await this.context?.resume(); } catch {}
-    }
-    this.unlocked = this.context?.state === 'running';
   }
 
-  activateScene(scene: AudioScene) {
-    if (scene === this.desiredScene && this.activeVoice?.scene === scene) return;
-    this.desiredScene = scene;
-    this.archiveStage = 0;
-    if (this.context && this.unlocked && !this.muted) this.crossfadeScene(scene, .72);
-  }
+  activateScene(scene: AudioScene) { this.desiredScene = scene; }
 
   deactivateScene(scene: AudioScene, nextScene?: AudioScene, releaseCues = true) {
     if (nextScene) this.desiredScene = nextScene;
-    if (this.activeVoice?.scene === scene) {
-      this.stopSceneVoice(this.activeVoice, .2);
-      this.activeVoice = undefined;
-    }
-    if (releaseCues) this.stopCues(scene, .12);
+    if (scene === 'archive') this.stopArchiveScan(.1);
+    if (scene === 'core') this.stopFinaleJourney(.14);
+    if (releaseCues) this.stopSceneCues(scene, .1);
   }
 
   disposeScene(scene: AudioScene) {
-    if (this.activeVoice?.scene === scene) {
-      this.stopSceneVoice(this.activeVoice, .035);
-      this.activeVoice = undefined;
-    }
-    this.stopCues(scene, .035);
+    if (scene === 'archive') this.stopArchiveScan(.035);
+    if (scene === 'core') this.stopFinaleJourney(.05);
+    this.stopSceneCues(scene, .035);
   }
 
-  playThemeEntry(theme: PortalSoundTheme) {
-    const cue = theme === 'dry-eye' ? cues.water
-      : theme === 'refraction' ? cues.focus
-        : theme === 'vision-archive' ? cues.scanStart : cues.time;
-    this.playCue(cue, .52, false);
+  playHomeEnter() { this.playCue(homeEntry, 'home', .88); }
+
+  playThemeEntry(theme: PortalSoundTheme) { this.playCue(nodeCues[theme], 'portal', .92); }
+
+  playCompletion() { this.playCue(completionCue, 'portal', .9); }
+
+  startArchiveScan() {
+    if (!this.context || !this.sfxBus || !this.reverbInput || !this.noiseBuffer || this.sfxMuted || this.scanVoice) return;
+    const context = this.context;
+    const now = context.currentTime;
+    const output = context.createGain();
+    const pulse = context.createOscillator();
+    const pulseGain = context.createGain();
+    const signal = context.createOscillator();
+    const signalGain = context.createGain();
+    const noise = context.createBufferSource();
+    const noiseFilter = context.createBiquadFilter();
+    const noiseGain = context.createGain();
+    const movement = context.createOscillator();
+    const movementDepth = context.createGain();
+
+    output.gain.setValueAtTime(.0001, now);
+    output.gain.exponentialRampToValueAtTime(.72, now + .32);
+    pulse.frequency.value = 72;
+    pulseGain.gain.value = .2;
+    signal.frequency.value = 184;
+    signalGain.gain.value = .07;
+    noise.buffer = this.noiseBuffer;
+    noise.loop = true;
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 540;
+    noiseFilter.Q.value = .55;
+    noiseGain.gain.value = .055;
+    movement.frequency.value = .42;
+    movementDepth.gain.value = .08;
+
+    movement.connect(movementDepth).connect(pulseGain.gain);
+    pulse.connect(pulseGain).connect(output);
+    signal.connect(signalGain).connect(output);
+    noise.connect(noiseFilter).connect(noiseGain).connect(output);
+    output.connect(this.sfxBus);
+    output.connect(this.reverbInput);
+    const sources: AudioScheduledSourceNode[] = [pulse, signal, noise, movement];
+    sources.forEach(source => source.start(now));
+    this.scanVoice = { scene: 'archive', output, sources };
+  }
+
+  stopArchiveScan(duration = .24) {
+    if (!this.scanVoice) return;
+    this.fadeAndStop(this.scanVoice, duration);
+    this.scanVoice = undefined;
+  }
+
+  playFinaleJourney() {
+    this.stopFinaleJourney(.04);
+    if (!this.context || !this.sfxBus || !this.reverbInput || !this.noiseBuffer || this.sfxMuted) return;
+    const context = this.context;
+    const now = context.currentTime;
+    const output = context.createGain();
+    const low = context.createOscillator();
+    const lowGain = context.createGain();
+    const shimmer = context.createOscillator();
+    const shimmerGain = context.createGain();
+    const open = context.createOscillator();
+    const openGain = context.createGain();
+    const noise = context.createBufferSource();
+    const noiseFilter = context.createBiquadFilter();
+    const noiseGain = context.createGain();
+
+    output.gain.setValueAtTime(.0001, now);
+    output.gain.exponentialRampToValueAtTime(.64, now + .48);
+    output.gain.setValueAtTime(.64, now + 4.4);
+    output.gain.exponentialRampToValueAtTime(.0001, now + 5.8);
+    low.frequency.setValueAtTime(62, now);
+    low.frequency.exponentialRampToValueAtTime(92, now + 5.3);
+    lowGain.gain.setValueAtTime(.18, now);
+    lowGain.gain.linearRampToValueAtTime(.24, now + 3.2);
+    shimmer.frequency.setValueAtTime(196, now);
+    shimmer.frequency.exponentialRampToValueAtTime(294, now + 4.5);
+    shimmerGain.gain.setValueAtTime(.0001, now);
+    shimmerGain.gain.exponentialRampToValueAtTime(.07, now + 1.5);
+    shimmerGain.gain.exponentialRampToValueAtTime(.035, now + 5.5);
+    open.type = 'triangle';
+    open.frequency.value = 138;
+    openGain.gain.setValueAtTime(.0001, now);
+    openGain.gain.setValueAtTime(.0001, now + 3.05);
+    openGain.gain.exponentialRampToValueAtTime(.12, now + 3.65);
+    openGain.gain.exponentialRampToValueAtTime(.0001, now + 5.65);
+    noise.buffer = this.noiseBuffer;
+    noise.loop = true;
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(420, now);
+    noiseFilter.frequency.exponentialRampToValueAtTime(1180, now + 3.8);
+    noiseGain.gain.value = .035;
+
+    low.connect(lowGain).connect(output);
+    shimmer.connect(shimmerGain).connect(output);
+    open.connect(openGain).connect(output);
+    noise.connect(noiseFilter).connect(noiseGain).connect(output);
+    output.connect(this.sfxBus);
+    output.connect(this.reverbInput);
+    const sources: AudioScheduledSourceNode[] = [low, shimmer, open, noise];
+    sources.forEach(source => { source.start(now); source.stop(now + 5.9); });
+    const voice: ActiveVoice = { scene: 'core', output, sources };
+    voice.cleanupTimer = window.setTimeout(() => {
+      this.voices.delete(voice);
+      if (this.finaleVoice === voice) this.finaleVoice = undefined;
+    }, 6100);
+    this.voices.add(voice);
+    this.finaleVoice = voice;
+  }
+
+  stopFinaleJourney(duration = .2) {
+    if (!this.finaleVoice) return;
+    this.fadeAndStop(this.finaleVoice, duration);
+    this.finaleVoice = undefined;
   }
 
   setInteraction(kind: InteractionKind, value: number) {
-    const voice = this.activeVoice;
-    if (!this.context || !voice || voice.scene !== kind || this.muted) return;
-    const nowMs = performance.now();
-    if (nowMs - this.lastModulation < 32) return;
-    this.lastModulation = nowMs;
-    const amount = Math.max(0, Math.min(1, value / 100));
-    const now = this.context.currentTime;
-    const smooth = .07;
-
-    if (kind === 'dryeye') {
-      voice.noiseGain.gain.setTargetAtTime(voice.spec.noiseGain * (1 - amount * .78), now, .11);
-      voice.noiseFilter.frequency.setTargetAtTime(760 - amount * 350, now, .1);
-      voice.room.gain.setTargetAtTime(.18 - amount * .105, now, .12);
-      voice.glassGain.gain.setTargetAtTime(voice.spec.glassGain * (1 - amount * .55), now, .1);
-    } else if (kind === 'refraction') {
-      voice.glass.frequency.setTargetAtTime(438 * (1 + amount * .022), now, smooth);
-      voice.texture.frequency.setTargetAtTime(292 * (1 - amount * .018), now, smooth);
-      voice.glassPan.pan.setTargetAtTime(-amount * .42, now, smooth);
-      voice.texturePan.pan.setTargetAtTime(amount * .38, now, smooth);
-      voice.room.gain.setTargetAtTime(.16 + amount * .08, now, .1);
-    } else if (kind === 'archive') {
-      voice.noiseFilter.frequency.setTargetAtTime(520 + amount * 760, now, smooth);
-      voice.glass.frequency.setTargetAtTime(432 + amount * 92, now, smooth);
-      voice.glassGain.gain.setTargetAtTime(.018 + amount * .016, now, smooth);
-      const stage = Math.min(3, Math.floor(amount * 4));
-      if (stage > this.archiveStage && stage < 4) {
-        this.archiveStage = stage;
-        if (stage > 0) this.playArchiveStage(stage);
-      }
-    } else {
-      voice.drone.frequency.setTargetAtTime(94 - amount * 12, now, .12);
-      voice.room.gain.setTargetAtTime(.2 + amount * .1, now, .12);
-      voice.textureGain.gain.setTargetAtTime(.008 + amount * .006, now, .1);
-      voice.motion.frequency.setTargetAtTime(.18 - amount * .055, now, .12);
-    }
+    if (kind === 'archive') return;
+    const now = performance.now();
+    if (now - this.lastInteractionCue < 280 || value < 18) return;
+    this.lastInteractionCue = now;
   }
 
   playPulse(kind: PulseKind, intensity = .5) {
-    if (kind === 'scan') {
-      this.playCue(intensity >= .36 ? cues.scanComplete : cues.scanStart, intensity, intensity >= .36);
-      return;
-    }
-    const cue = kind === 'home' ? cues.awaken
-      : kind === 'route-in' ? cues.open
-        : kind === 'route-out' ? cues.close
-          : kind === 'water' ? cues.water
-            : kind === 'focus' ? cues.focus : cues.time;
-    this.playCue(cue, intensity, false);
+    if (kind === 'home') this.playCue(homeEntry, this.desiredScene, intensity);
+    else if (kind === 'route-in') this.playCue(homeEntry, this.desiredScene, intensity * .82);
+    else if (kind === 'route-out') this.playCue(routeOutCue, this.desiredScene, intensity);
+    else if (kind === 'water') this.playCue(subtleWater, this.desiredScene, intensity);
+    else if (kind === 'focus') this.playCue(subtleFocus, this.desiredScene, intensity);
+    else if (kind === 'scan') this.playCue(scanCompleteCue, this.desiredScene, intensity);
+    else this.playCue(subtleTime, this.desiredScene, intensity);
   }
 
   private createGraph() {
@@ -241,224 +375,136 @@ class OpticalAudioEngine {
     if (!AudioContextClass) return;
     const context = new AudioContextClass({ latencyHint: 'interactive' });
     const master = context.createGain();
-    const ambientBus = context.createGain();
-    const interactionBus = context.createGain();
-    const completionBus = context.createGain();
+    const musicBus = context.createGain();
+    const sfxBus = context.createGain();
     const reverbInput = context.createGain();
-    const reverb = context.createConvolver();
+    const convolver = context.createConvolver();
     const reverbReturn = context.createGain();
     const toneControl = context.createBiquadFilter();
     const compressor = context.createDynamicsCompressor();
 
     master.gain.value = 0;
-    ambientBus.gain.value = .36;
-    interactionBus.gain.value = .56;
-    completionBus.gain.value = .66;
-    reverbReturn.gain.value = .42;
+    musicBus.gain.value = this.bgmMuted ? 0 : mapVolumeToGain(this.bgmVolume);
+    sfxBus.gain.value = this.sfxMuted ? 0 : mapVolumeToGain(this.sfxVolume);
+    reverbReturn.gain.value = .32;
     toneControl.type = 'lowpass';
-    toneControl.frequency.value = 1850;
-    toneControl.Q.value = .35;
-    compressor.threshold.value = -24;
-    compressor.knee.value = 22;
-    compressor.ratio.value = 3;
-    compressor.attack.value = .018;
-    compressor.release.value = .28;
+    toneControl.frequency.value = 3900;
+    toneControl.Q.value = .18;
+    compressor.threshold.value = -20;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 2.4;
+    compressor.attack.value = .02;
+    compressor.release.value = .3;
+    convolver.buffer = this.createImpulse(context, 1.65, 3.4);
+    this.noiseBuffer = this.createNoise(context, 6.2);
 
-    reverb.buffer = this.createImpulse(context, 1.45, 3.3);
-    this.noiseBuffer = this.createNoise(context, 2.4);
-    ambientBus.connect(master);
-    interactionBus.connect(master);
-    completionBus.connect(master);
-    reverbInput.connect(reverb).connect(reverbReturn).connect(master);
+    musicBus.connect(master);
+    sfxBus.connect(master);
+    reverbInput.connect(convolver).connect(reverbReturn).connect(sfxBus);
     master.connect(toneControl).connect(compressor).connect(context.destination);
+
+    const music = new Audio(BGM_SOURCE);
+    music.loop = true;
+    music.preload = 'none';
+    music.crossOrigin = 'anonymous';
+    music.setAttribute('playsinline', '');
+    const mediaSource = context.createMediaElementSource(music);
+    mediaSource.connect(musicBus);
 
     this.context = context;
     this.master = master;
-    this.ambientBus = ambientBus;
-    this.interactionBus = interactionBus;
-    this.completionBus = completionBus;
+    this.musicBus = musicBus;
+    this.sfxBus = sfxBus;
     this.reverbInput = reverbInput;
+    this.music = music;
+    this.mediaSource = mediaSource;
   }
 
-  private crossfadeScene(scene: AudioScene, duration: number) {
-    if (!this.context || !this.ambientBus || !this.reverbInput) return;
+  private async startMusic() {
+    if (!this.music || this.bgmMuted || this.bgmVolume === 0 || document.hidden) return;
+    try { await this.music.play(); } catch {}
+  }
+
+  private playCue(cue: Cue, scene: AudioScene, intensity: number) {
+    if (!this.context || !this.sfxBus || !this.reverbInput || !this.noiseBuffer || this.sfxMuted || this.sfxVolume === 0) return;
     const context = this.context;
     const now = context.currentTime;
-    const previous = this.activeVoice;
-    if (previous) {
-      this.stopSceneVoice(previous, duration);
-    }
-    const voice = this.createSceneVoice(scene);
-    voice.output.gain.setValueAtTime(.0001, now);
-    voice.output.gain.exponentialRampToValueAtTime(1, now + Math.max(.65, duration * 1.4));
-    this.activeVoice = voice;
-  }
-
-  private createSceneVoice(scene: AudioScene): SceneVoice {
-    const context = this.context!;
-    const spec = scenes[scene];
     const output = context.createGain();
-    const room = context.createGain();
-    const drone = context.createOscillator();
-    const droneGain = context.createGain();
-    const glass = context.createOscillator();
-    const glassGain = context.createGain();
-    const glassPan = context.createStereoPanner();
-    const texture = context.createOscillator();
-    const textureGain = context.createGain();
-    const texturePan = context.createStereoPanner();
-    const noise = context.createBufferSource();
-    const noiseFilter = context.createBiquadFilter();
-    const noiseGain = context.createGain();
-    const motion = context.createOscillator();
-    const glassMotion = context.createGain();
-    const textureMotion = context.createGain();
-
-    drone.type = 'sine';
-    drone.frequency.value = spec.drone;
-    droneGain.gain.value = spec.droneGain;
-    glass.type = 'sine';
-    glass.frequency.value = spec.glass;
-    glassGain.gain.value = spec.glassGain;
-    glassPan.pan.value = -spec.pan;
-    texture.type = 'triangle';
-    texture.frequency.value = spec.texture;
-    texture.detune.value = -5;
-    textureGain.gain.value = spec.textureGain;
-    texturePan.pan.value = spec.pan;
-    noise.buffer = this.noiseBuffer!;
-    noise.loop = true;
-    noiseFilter.type = scene === 'dryeye' ? 'bandpass' : 'lowpass';
-    noiseFilter.frequency.value = spec.noiseFilter;
-    noiseFilter.Q.value = scene === 'dryeye' ? .45 : .25;
-    noiseGain.gain.value = spec.noiseGain;
-    motion.type = 'sine';
-    motion.frequency.value = spec.motion;
-    glassMotion.gain.value = spec.pan * .45;
-    textureMotion.gain.value = -spec.pan * .38;
-    room.gain.value = spec.room;
-
-    drone.connect(droneGain).connect(output);
-    glass.connect(glassGain).connect(glassPan).connect(output);
-    texture.connect(textureGain).connect(texturePan).connect(output);
-    noise.connect(noiseFilter).connect(noiseGain).connect(output);
-    motion.connect(glassMotion).connect(glassPan.pan);
-    motion.connect(textureMotion).connect(texturePan.pan);
-    output.connect(this.ambientBus!);
-    output.connect(room).connect(this.reverbInput!);
-
-    const sources: AudioScheduledSourceNode[] = [drone, glass, texture, noise, motion];
-    sources.forEach(source => source.start());
-    return { scene, output, room, drone, droneGain, glass, glassGain, glassPan, texture, textureGain, texturePan, noise, noiseGain, noiseFilter, motion, sources, spec };
-  }
-
-  private playCue(spec: CueSpec, intensity: number, completion: boolean) {
-    if (!this.context || !this.interactionBus || !this.completionBus || !this.reverbInput || !this.noiseBuffer || this.muted) return;
-    const context = this.context;
-    const now = context.currentTime;
-    const toneMix = context.createGain();
-    const filter = context.createBiquadFilter();
-    const envelope = context.createGain();
-    const panner = context.createStereoPanner();
+    const dry = context.createGain();
     const wet = context.createGain();
-    const cueOutput = context.createGain();
+    const filter = context.createBiquadFilter();
     const sources: AudioScheduledSourceNode[] = [];
-    const peak = spec.level * (.82 + Math.max(0, Math.min(1, intensity)) * .28);
+    const safeIntensity = Math.max(.18, Math.min(1, intensity));
 
-    toneMix.gain.value = 1;
+    output.gain.setValueAtTime(.0001, now);
+    output.gain.exponentialRampToValueAtTime(.7 + safeIntensity * .3, now + cue.attack);
+    output.gain.setValueAtTime(.7 + safeIntensity * .3, now + Math.max(cue.attack, cue.duration - cue.release));
+    output.gain.exponentialRampToValueAtTime(.0001, now + cue.duration);
+    dry.gain.value = 1;
+    wet.gain.value = cue.wet;
     filter.type = 'lowpass';
-    filter.frequency.value = spec.filter;
-    filter.Q.value = .4;
-    envelope.gain.setValueAtTime(.0001, now);
-    envelope.gain.exponentialRampToValueAtTime(peak, now + spec.attack);
-    envelope.gain.setTargetAtTime(peak * .72, now + spec.duration * .38, spec.duration * .24);
-    envelope.gain.exponentialRampToValueAtTime(.0001, now + spec.duration);
-    if (spec.pan) {
-      panner.pan.setValueAtTime(spec.pan[0], now);
-      panner.pan.linearRampToValueAtTime(spec.pan[1], now + spec.duration);
-    }
-    wet.gain.value = spec.wet;
+    filter.frequency.value = cue.filter;
+    filter.Q.value = .28;
 
-    spec.tones.forEach(([from, to, level, wave]) => {
+    cue.tones.forEach(tone => {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
-      oscillator.type = wave;
-      oscillator.frequency.setValueAtTime(from, now);
-      oscillator.frequency.exponentialRampToValueAtTime(to, now + spec.duration * .82);
-      gain.gain.value = level;
-      oscillator.connect(gain).connect(toneMix);
-      oscillator.start(now);
-      oscillator.stop(now + spec.duration + .06);
+      const panner = context.createStereoPanner();
+      const delay = tone.delay ?? 0;
+      const duration = tone.duration ?? Math.max(.16, cue.duration - delay);
+      oscillator.type = tone.wave ?? 'sine';
+      oscillator.frequency.setValueAtTime(tone.from, now + delay);
+      oscillator.frequency.exponentialRampToValueAtTime(tone.to, now + delay + duration * .84);
+      gain.gain.value = tone.level * safeIntensity;
+      panner.pan.value = tone.pan ?? 0;
+      oscillator.connect(gain).connect(panner).connect(filter);
+      oscillator.start(now + delay);
+      oscillator.stop(now + delay + duration + .04);
       sources.push(oscillator);
     });
 
-    if (spec.noise) {
-      const noise = context.createBufferSource();
+    if (cue.noise) {
+      const source = context.createBufferSource();
       const noiseFilter = context.createBiquadFilter();
-      const noiseGain = context.createGain();
-      noise.buffer = this.noiseBuffer;
+      const gain = context.createGain();
+      const delay = cue.noise.delay ?? 0;
+      const duration = cue.noise.duration ?? cue.duration - delay;
+      source.buffer = this.noiseBuffer;
       noiseFilter.type = 'bandpass';
-      noiseFilter.frequency.value = spec.noise[1];
-      noiseFilter.Q.value = .55;
-      noiseGain.gain.value = spec.noise[0];
-      noise.connect(noiseFilter).connect(noiseGain).connect(toneMix);
-      noise.start(now);
-      noise.stop(now + spec.duration + .06);
-      sources.push(noise);
+      noiseFilter.frequency.value = cue.noise.frequency;
+      noiseFilter.Q.value = .5;
+      gain.gain.value = cue.noise.level * safeIntensity;
+      source.connect(noiseFilter).connect(gain).connect(filter);
+      source.start(now + delay);
+      source.stop(now + delay + duration + .04);
+      sources.push(source);
     }
 
-    cueOutput.gain.value = 1;
-    toneMix.connect(filter).connect(envelope).connect(panner).connect(cueOutput);
-    cueOutput.connect(completion ? this.completionBus : this.interactionBus);
-    cueOutput.connect(wet).connect(this.reverbInput);
-    const cueVoice = {
-      scene: this.desiredScene,
-      output: cueOutput,
-      sources,
-      cleanupTimer: 0,
-    } satisfies CueVoice;
-    cueVoice.cleanupTimer = window.setTimeout(() => this.activeCues.delete(cueVoice), (spec.duration + .14) * 1000);
-    this.activeCues.add(cueVoice);
+    filter.connect(output);
+    output.connect(dry).connect(this.sfxBus);
+    output.connect(wet).connect(this.reverbInput);
+    const voice: ActiveVoice = { scene, output, sources };
+    voice.cleanupTimer = window.setTimeout(() => this.voices.delete(voice), (cue.duration + .14) * 1000);
+    this.voices.add(voice);
   }
 
-  private stopSceneVoice(voice: SceneVoice, duration: number) {
+  private stopSceneCues(scene: AudioScene, duration: number) {
+    for (const voice of Array.from(this.voices)) {
+      if (voice.scene === scene) this.fadeAndStop(voice, duration);
+    }
+  }
+
+  private fadeAndStop(voice: ActiveVoice, duration: number) {
     if (!this.context) return;
     const now = this.context.currentTime;
+    if (voice.cleanupTimer) window.clearTimeout(voice.cleanupTimer);
     voice.output.gain.cancelScheduledValues(now);
     voice.output.gain.setValueAtTime(Math.max(.0001, voice.output.gain.value), now);
     voice.output.gain.exponentialRampToValueAtTime(.0001, now + duration);
     voice.sources.forEach(source => {
-      try { source.stop(now + duration + .06); } catch {}
+      try { source.stop(now + duration + .05); } catch {}
     });
-  }
-
-  private stopCues(scene: AudioScene, duration: number) {
-    if (!this.context) return;
-    const now = this.context.currentTime;
-    for (const cue of this.activeCues) {
-      if (cue.scene !== scene) continue;
-      window.clearTimeout(cue.cleanupTimer);
-      cue.output.gain.cancelScheduledValues(now);
-      cue.output.gain.setValueAtTime(Math.max(.0001, cue.output.gain.value), now);
-      cue.output.gain.exponentialRampToValueAtTime(.0001, now + duration);
-      cue.sources.forEach(source => {
-        try { source.stop(now + duration + .04); } catch {}
-      });
-      this.activeCues.delete(cue);
-    }
-  }
-
-  private playArchiveStage(stage: number) {
-    const base = 172 + stage * 24;
-    this.playCue({
-      duration: .52,
-      attack: .08,
-      level: .052,
-      filter: 940,
-      wet: .2,
-      tones: [[base, base * 1.08, .6, 'sine'], [base * 2, base * 2.05, .13, 'triangle']],
-      pan: [stage % 2 ? -.18 : .18, 0],
-    }, .28, false);
+    this.voices.delete(voice);
   }
 
   private createNoise(context: AudioContext, seconds: number) {
@@ -467,7 +513,7 @@ class OpticalAudioEngine {
     let previous = 0;
     for (let index = 0; index < data.length; index += 1) {
       const white = Math.random() * 2 - 1;
-      previous = previous * .86 + white * .14;
+      previous = previous * .9 + white * .1;
       data[index] = previous;
     }
     return buffer;
@@ -486,23 +532,49 @@ class OpticalAudioEngine {
 
   private setMasterLevel(smooth: number) {
     if (!this.context || !this.master) return;
-    const target = this.muted || document.hidden ? 0 : this.volume * .9;
+    const target = document.hidden ? 0 : 1;
     this.master.gain.setTargetAtTime(target, this.context.currentTime, smooth);
+  }
+
+  private applyBusLevels(smooth: number) {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    if (this.musicBus) {
+      const bgmTarget = this.bgmMuted ? 0 : mapVolumeToGain(this.bgmVolume);
+      this.musicBus.gain.setTargetAtTime(bgmTarget, now, smooth);
+      if (!this.bgmMuted && this.bgmVolume > 0) void this.startMusic();
+    }
+    if (this.sfxBus) {
+      const sfxTarget = this.sfxMuted ? 0 : mapVolumeToGain(this.sfxVolume);
+      this.sfxBus.gain.setTargetAtTime(sfxTarget, now, smooth);
+    }
   }
 
   private handleVisibility = () => {
     if (!this.context || !this.unlocked) return;
     if (document.hidden) {
-      this.setMasterLevel(.08);
-      window.setTimeout(() => { if (document.hidden) void this.context?.suspend(); }, 340);
+      this.setMasterLevel(.06);
+      window.setTimeout(() => {
+        if (!document.hidden) return;
+        this.music?.pause();
+        void this.context?.suspend();
+      }, 360);
     } else {
-      void this.context.resume().then(() => this.setMasterLevel(.18)).catch(() => {});
+      void this.context.resume().then(async () => {
+        this.setMasterLevel(.14);
+        this.applyBusLevels(.08);
+        if (!this.bgmMuted) await this.startMusic();
+      }).catch(() => {});
     }
   };
 
   private handlePageShow = () => {
-    if (!this.context || !this.unlocked || this.muted) return;
-    void this.context.resume().then(() => this.setMasterLevel(.18)).catch(() => {});
+    if (!this.context || !this.unlocked) return;
+    void this.context.resume().then(async () => {
+      this.setMasterLevel(.14);
+      this.applyBusLevels(.08);
+      if (!this.bgmMuted) await this.startMusic();
+    }).catch(() => {});
   };
 
   private emit() { this.listeners.forEach(listener => listener()); }

@@ -111,6 +111,7 @@ export function App() {
   const completedThemesRef = useRef(new Set<PortalTheme['id']>());
   const [recentCompletion, setRecentCompletion] = useState<PortalTheme['id'] | null>(null);
   const completionTimer = useRef<number | undefined>(undefined);
+  const completionSoundPending = useRef(false);
   const routeLayers = useRef<Partial<Record<Page, HTMLDivElement | null>>>({});
   const navigationBusy = useRef(false);
   const navigationVersion = useRef(0);
@@ -182,7 +183,7 @@ export function App() {
     const requestId = ++transitionId.current;
     navigationVersion.current = requestId;
     setPortalArrival('default');
-    opticalAudio.playPulse('route-in', .42);
+    opticalAudio.playHomeEnter();
     try {
       await Promise.all([preloadVisual(portalVisual.src), opticalAudio.prepareScene('portal')]);
       if (navigationVersion.current !== requestId) return;
@@ -235,12 +236,13 @@ export function App() {
   function enterVisionCore() {
     if (completedThemesRef.current.size < portalThemes.length || !finaleReady || navigationBusy.current || transition || preparing) return;
     navigationBusy.current = true;
-    opticalAudio.playPulse('route-in', .52);
+    opticalAudio.playFinaleJourney();
     opticalAudio.deactivateScene('portal', undefined, true);
     const started = finaleRef.current?.begin() ?? false;
     if (started) setFinaleEntering(true);
     else {
       navigationBusy.current = false;
+      opticalAudio.stopFinaleJourney();
       opticalAudio.activateScene('portal');
     }
   }
@@ -256,6 +258,7 @@ export function App() {
     setFinaleLoadFailed(true);
     setFinaleEntering(false);
     navigationBusy.current = false;
+    opticalAudio.stopFinaleJourney();
     if (page === 'portal') opticalAudio.activateScene('portal');
   }, [page]);
 
@@ -278,6 +281,7 @@ export function App() {
         completedThemesRef.current.add(completedTheme);
         setCompletedThemes(Array.from(completedThemesRef.current));
         setRecentCompletion(completedTheme);
+        completionSoundPending.current = true;
       }
       opticalAudio.playPulse('route-out', .46);
       await Promise.all([preloadVisual(portalVisual.src), opticalAudio.prepareScene('portal')]);
@@ -307,6 +311,10 @@ export function App() {
     if (request.direction === 'home-to-portal') setExiting(false);
     setTransition(current => current?.id === request.id ? null : current);
     if (request.direction === 'topic-to-portal') {
+      if (completionSoundPending.current) {
+        completionSoundPending.current = false;
+        opticalAudio.playCompletion();
+      }
       window.clearTimeout(completionTimer.current);
       completionTimer.current = window.setTimeout(() => setRecentCompletion(null), 1900);
     }

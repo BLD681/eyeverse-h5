@@ -75,6 +75,7 @@ export function VisionArchiveExperience({ onExit }: { onExit: (completed?: boole
 
   function finishScan() {
     press.current.active = false;
+    opticalAudio.stopArchiveScan(.18);
     setScanProgress(100);
     setScanState('sealing');
     opticalAudio.playPulse('scan', .42);
@@ -110,6 +111,7 @@ export function VisionArchiveExperience({ onExit }: { onExit: (completed?: boole
     press.current.startProgress = scanProgress;
     lastProgressPaint.current = 0;
     setScanState('scanning');
+    opticalAudio.startArchiveScan();
     if (scanProgress === 0) {
       hapticStage.current = 0;
       haptic(9);
@@ -122,6 +124,7 @@ export function VisionArchiveExperience({ onExit }: { onExit: (completed?: boole
     if (!press.current.active) return;
     press.current.active = false;
     cancelAnimationFrame(frame.current ?? 0);
+    opticalAudio.stopArchiveScan(.2);
     setScanState('idle');
   }
 
