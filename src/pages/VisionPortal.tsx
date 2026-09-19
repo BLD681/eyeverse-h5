@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { portalThemes, type PortalTheme } from '../config/themes';
-import { portalVisual } from '../config/visuals';
+import { finaleVisuals, portalVisual } from '../config/visuals';
 
 type PortalStyle = CSSProperties & {
   '--active-x'?: string;
@@ -120,6 +120,8 @@ export function VisionPortal({ active = true, arrivalMode = 'default', completed
         })}
       </nav>
     </div>
+
+    <img className="portal-brand-logo" src={finaleVisuals.logo} alt="爱尔眼科" draggable={false} />
 
     {evolved && <button className="portal-core-entry" type="button" onClick={onEnterCore} disabled={!coreReady}>
       <span>{coreLoadingFailed ? 'VIDEO UNAVAILABLE' : coreReady ? 'ENTER THE EYE WITHIN' : 'PREPARING THE JOURNEY'}</span><i aria-hidden="true">→</i>

@@ -45,13 +45,13 @@ export function Home({ exiting, introSeen, onAwakened, onEnter }: {
     <AmbientParticles />
     <div className="depth-vignette" aria-hidden="true" />
     <div className="tunnel-light" aria-hidden="true" />
+    <img className="home-brand-logo" src={finaleVisuals.logo} alt="爱尔眼科" draggable={false} />
     <header className="home-title">
       <h1>EYEVERSE</h1>
       <p>眼界宇宙</p>
     </header>
     <div className="home-action">
       <GlassButton disabled={!ready || !interactive || exiting} onClick={onEnter}>开始探索</GlassButton>
-      <img className="home-brand-logo" src={finaleVisuals.logo} alt="爱尔眼科" draggable={false} />
     </div>
     {!ready && !failed && <p className="load-state" role="status">正在开启眼界…</p>}
     {failed && <div className="load-state" role="alert"><p>视觉素材加载失败</p><button onClick={() => location.reload()}>重新加载</button></div>}
